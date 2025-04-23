@@ -3,14 +3,17 @@ import pandas as pd
 import locale
 import io
 
-# Definir o locale
-locale.setlocale(locale.LC_ALL, 'pt_BR.UTF-8')
+# Tenta definir locale para pt_BR, com fallback
+try:
+    locale.setlocale(locale.LC_ALL, 'pt_BR.UTF-8')
+except locale.Error:
+    locale.setlocale(locale.LC_ALL, '')
 
 # Configuração da página
 st.set_page_config(layout="wide")
 st.title("Validador de Operações Orçamentárias")
 
-# Função para carregar a lista mestre
+# Cache para carregar lista mestre
 @st.cache_data
 def carregar_lista_mestre(path="dados/operacoes.csv"):
     df = pd.read_csv(path, sep=";", dtype={"Cod": str})
@@ -18,32 +21,27 @@ def carregar_lista_mestre(path="dados/operacoes.csv"):
     df["Descr"] = df["Descr"].str.lower().str.strip()
     return dict(zip(df["Cod"], df["Descr"]))
 
+# Função para converter valores para float (de forma robusta)
+def para_float(valor):
+    try:
+        if isinstance(valor, str):
+            return float(valor.replace('R$', '').replace('.', '').replace(',', '.'))
+        return float(valor)
+    except:
+        return 0.0
 
-# Carrega DataFrame da lista mestre
-operacoes = pd.read_csv("dados/operacoes.csv", sep=";")
-operacoes["Cod"] = operacoes["Cod"].astype(str).str.zfill(7)
-operacoes["Descr"] = operacoes["Descr"].str.lower().str.strip()
-lista_mestre = dict(zip(operacoes["Cod"], operacoes["Descr"]))
+# Função para formatar moeda brasileira
+def formatar_moeda_br(valor):
+    return f"R$ {valor:,.2f}".replace(",", "v").replace(".", ",").replace("v", ".")
+
+# Carrega a lista mestre
+lista_mestre = carregar_lista_mestre()
 
 # Upload do arquivo Excel
 uploaded_file = st.file_uploader("Faça upload do arquivo Excel (Razão)", type=["xlsx"])
 
-# Função para parse de moeda
-def parse_moeda(valor):
-    try:
-        valor_float = float(valor)
-        return locale.currency(valor_float, grouping=True)
-    except:
-        return None
-
 # Se um arquivo for carregado
 if uploaded_file:
-
-    # Inicializa o DataFrame de resultado no estado da sessão, se necessário
-    if "df_resultado" not in st.session_state:
-        st.session_state.df_resultado = None
-
-    # Carrega o arquivo Excel com os dados
     df = pd.read_excel(uploaded_file, dtype={
         "Centro de Custo": str,
         "Descr. Op. Orc.": str,
@@ -53,72 +51,48 @@ if uploaded_file:
         "Histórico": str
     })
 
-    # Converter colunas específicas
+    # Tratamento de colunas
     df["Op. Orc."] = df["Op. Orc."].astype(str).str.zfill(7)
     df["Descr. Op. Orc."] = df["Descr. Op. Orc."].str.lower().str.strip()
+    df["Data Contábil"] = pd.to_datetime(df["Data Contábil"], errors="coerce")
+    df["Valor_Numérico"] = df["Valor Realizado"].apply(para_float)
+    df["Valor Realizado"] = df["Valor_Numérico"].apply(formatar_moeda_br)
 
-    # Converter data contábil
-    df["Data Contábil"] = pd.to_datetime(df["Data Contábil"], format="%d/%m/%Y", errors="coerce")
-
-    # Converter valor realizado para moeda
-    df["Valor Realizado"] = df["Valor Realizado"].apply(parse_moeda)
-
-    # Função de validação
+    # Validação
     def validar(cod, descr):
         if cod not in lista_mestre:
             return "Código não encontrado"
         elif lista_mestre[cod] != descr:
             return "Descrição divergente"
-        else:
-            return "OK"
+        return "OK"
 
-    # Aplicar a validação em cada linha
     df["Validação"] = df.apply(lambda row: validar(row["Op. Orc."], row["Descr. Op. Orc."]), axis=1)
 
-    # Exibir melhorias na tabela
+    # Exibições finais
     df["Descr. Op. Orc."] = df["Descr. Op. Orc."].str.capitalize()
-    df["Data Contábil"] = df["Data Contábil"].dt.strftime('%d/%m/%Y')
-    df["Valor Realizado"] = df["Valor Realizado"]
+    df["Data Contábil"] = df["Data Contábil"].dt.strftime('%d/%m/%Y').fillna("")
 
-    # Mostrar o KPI de "Sem Op. Orc."
+    # KPIs
     sem_op_orc = df[df["Descr. Op. Orc."] == "Sem op. orc."]
-    soma_sem_op_orc = sem_op_orc["Valor Realizado"].apply(lambda x: float(x.replace('R$', '').replace('.', '').replace(',', '.'))).sum()
+    soma_sem_op_orc = sem_op_orc["Valor_Numérico"].sum()
+    kpis_conta = df.groupby("Conta")["Valor_Numérico"].sum().reset_index()
 
-    # Mostrar KPIs por tipo de conta
-    kpis_conta = df.groupby("Conta")["Valor Realizado"].apply(
-        lambda x: x.apply(lambda val: float(val.replace('R$', '').replace('.', '').replace(',', '.'))).sum()
-    ).reset_index()
-
-    # # Exibir indicadores
-    # st.subheader("Indicadores")
-    
-    # # KPI de "Sem Op. Orc."
-    # st.metric("Impacto Financeiro - Sem Op. Orc.", f"R$ {soma_sem_op_orc:,.2f}")
-
-    # # KPIs por tipo de conta
-    # for index, row in kpis_conta.iterrows():
-    #     st.metric(f"KPI - Conta {row['Conta']}", f"R$ {row['Valor Realizado']:,.2f}")
     st.subheader("KPIs")
-
-    # KPI 1 - Impacto Financeiro - Sem Op. Orc.
     kpi_data = [("Impacto Financeiro - Sem Op. Orc.", soma_sem_op_orc)]
+    for _, row in kpis_conta.iterrows():
+        kpi_data.append((f"KPI - Conta {row['Conta']}", row["Valor_Numérico"]))
 
-    # KPIs das contas
-    for index, row in kpis_conta.iterrows():
-        kpi_data.append((f"KPI - Conta {row['Conta']}", row["Valor Realizado"]))
-
-    # Organiza os KPIs em 3 colunas e 2 linhas
+    # Organiza KPIs em colunas
     num_cols = 3
     rows = [kpi_data[i:i + num_cols] for i in range(0, len(kpi_data), num_cols)]
-
     for row in rows:
         cols = st.columns(num_cols)
         for col, (label, value) in zip(cols, row):
-            col.metric(label, f"R$ {value:,.2f}")
-    # Exibir sucesso no processamento
+            col.metric(label, formatar_moeda_br(value))
+
     st.badge("Arquivo processado com sucesso!", icon=":material/check:", color="green")
 
-    # Estilos personalizados para a exibição do DataFrame
+    # Estilo para DataFrame
     st.markdown("""
         <style>
             .element-container:has(.stDataFrame) {
@@ -127,24 +101,18 @@ if uploaded_file:
             }
         </style>
     """, unsafe_allow_html=True)
-    
-    # Exibir a tabela de validação
+
+    # Exibe a tabela ocultando coluna interna
+    colunas_visiveis = [col for col in df.columns if col != "Valor_Numérico"]
     with st.container():
-        st.data_editor(df, hide_index=True, width=1755, height=740)
+        st.data_editor(df[colunas_visiveis], hide_index=True, width=1755, height=740)
 
-    # Salva o DataFrame de resultado no estado da sessão
-    st.session_state.df_resultado = df
-
-    # Exibe o DataFrame
-    # st.dataframe(st.session_state.df_resultado)
-
-    # Gerar o arquivo Excel com os dados processados
+    # Prepara download do resultado
     output = io.BytesIO()
     with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
         df.to_excel(writer, index=False, sheet_name='Validação')
-
     processed_data = output.getvalue()
-
+    
     # Botão para download do resultado
     st.download_button(
         label="📥 Baixar resultado em Excel",
