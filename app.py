@@ -17,7 +17,7 @@ st.title("Validador de Operações Orçamentárias")
 @st.cache_data
 def carregar_lista_mestre(path="dados/operacoes.csv"):
     df = pd.read_csv(path, sep=";", dtype={"Cod": str})
-    df["Cod"] = df["Cod"].str.zfill(8)
+    df["Cod"] = df["Cod"].str.zfill(7)
     df["Descr"] = df["Descr"].str.lower().str.strip()
     return dict(zip(df["Cod"], df["Descr"]))
 
