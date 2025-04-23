@@ -1,0 +1,16 @@
+[server]
+headless = true
+
+[theme]
+primaryColor = "#00995d"
+backgroundColor = "#FFF"
+secondaryBackgroundColor = "#f5fff5"
+textColor = "#000"
+font = "sans serif"
+
+[deprecation]
+showfileUploaderEncoding = false
+
+# Define o uso total da largura da página para a tabela
+[layout]
+wide = true  # Usar layout mais largo para o conteúdo
