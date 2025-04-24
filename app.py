@@ -13,7 +13,11 @@ except locale.Error:
     locale.setlocale(locale.LC_ALL, '')
 
 # Configuração da página
-st.set_page_config(layout="wide")
+st.set_page_config(
+    page_title="Validador de Operações Orçamentárias",  # ← título da aba
+    layout="wide",
+    page_icon="🧾"  # ← opcional: ícone na aba
+)
 st.title("Validador de Operações Orçamentárias")
 
 @st.cache_data
